@@ -28,7 +28,7 @@ import asyncio, os
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
-ROOT = r"F:\opencode工坊"
+ROOT = r"F:\opencode工坊\clawsgo"
 
 async def main():
     env = dict(os.environ); env["PYTHONPATH"] = ROOT
@@ -60,11 +60,11 @@ asyncio.run(main())
     "clawsgo-self": {
       "type": "local",
       "command": ["C:\\Python314\\python.exe", "-m", "clawsgo_self.server"],
-      "cwd": "F:\\opencode工坊",
+      "cwd": "F:\\opencode工坊\\clawsgo",
       "enabled": true,
       "environment": {
         "CLAWSGO_SELF_ENV": "dev",
-        "PYTHONPATH": "F:\\opencode工坊"
+        "PYTHONPATH": "F:\\opencode工坊\\clawsgo"
       }
     }
   }
@@ -73,7 +73,7 @@ asyncio.run(main())
 
 关键点：
 - **用绝对路径**指向解释器与工作区（不要用裸 `python`，避免命中系统 Store 占位符）。
-- `cwd` 与 `PYTHONPATH` 都指向项目根，保证能 import 到 `clawsgo_self` 包。
+- `cwd` 与 `PYTHONPATH` 都指向项目根 `F:\opencode工坊\clawsgo`，保证能 import 到 `clawsgo_self` 包、并在该目录下读写 `.clawsgo-self` 运行产物。
 
 ### 让会话内看见工具
 
@@ -131,7 +131,7 @@ get_deliverables(paper_id="explain_llm")
 | 现象 | 原因 | 处理 |
 | --- | --- | --- |
 | 工具列表里没有 `clawsgo-self` | opencode 未重启 / 未 connect | 完全退出重启；或 `/mcp` → connect |
-| 启动报错 `ModuleNotFoundError` | `PYTHONPATH` 或 `cwd` 未指向项目根 | 核对配置中的绝对路径 |
+| 启动报错 `ModuleNotFoundError` | `PYTHONPATH` 或 `cwd` 未指向项目根 `clawsgo` | 核对配置中的绝对路径 |
 | 调用超时 / 卡住 | 首次冷启动 | 稍等 1–2s 重试 |
 | 无法 git push | 本机 `github.com` 被网络环境阻断 | 用 GitHub API / MCP，或等网络恢复 |
 
@@ -140,5 +140,6 @@ get_deliverables(paper_id="explain_llm")
 ## 5. 测试
 
 ```bash
+cd F:\opencode工坊\clawsgo
 python -m pytest tests/ -q   # 40 项，全离线可跑
 ```
