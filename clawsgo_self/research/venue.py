@@ -38,9 +38,9 @@ _VENUE_DB: list[tuple[str, dict]] = [
     ("医疗|bio|生物|医学|health|drug|gene", {
         "name": "Nature Methods / Bioinformatics / NEJM AI", "type": "期刊",
         "field": "生物医学", "note": "生物医学计算期刊"}),
-    ("分布式|系统|system|性能|os|database|并行", {
+    ("分布式|系统|system|性能|os|database|database|并行", {
         "name": "OSDI / SOSP / VLDB / TPDS", "type": "会议/期刊",
-        "field": "系统与数据库", "note": "系统顶会"}),
+        "field": "系统与数据库", "note": "系统顶会"}, ),
     ("优化|optim|数值|numeric|求解|solver|数学", {
         "name": "SIAM / JMLR / COLT", "type": "期刊/会议",
         "field": "优化与学习理论", "note": "理论/优化向"}),
