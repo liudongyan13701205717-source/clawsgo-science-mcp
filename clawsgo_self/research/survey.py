@@ -64,10 +64,15 @@ def literature_review(
     paper_id: str,
     layout: Layout,
     limit: int = 10,
+    sources: list[str] | None = None,
 ) -> LiteratureReview:
     r = LiteratureReview(ok=False, topic=topic)
     notes: list = []
-    papers = lit.search_openalex(topic, limit=limit)
+    from clawsgo_self.science.api import cross_lookup
+    if sources:
+        papers = cross_lookup(topic, databases=sources, limit=limit)
+    else:
+        papers = lit.search_openalex(topic, limit=limit)
     papers = lit.dedupe(papers)
     r.papers = papers
     if not papers:
@@ -91,6 +96,7 @@ def literature_review(
 
 
 def _keywords(topic: str) -> list:
+    # 简单分词：按空格/逗号/顿号拆分，去重并保留前 6 个
     import re
 
     toks = re.split(r"[\s,，、;；/]+", topic)
@@ -104,6 +110,7 @@ def _keywords(topic: str) -> list:
 
 def _template_review(r: LiteratureReview, notes: list) -> None:
     papers = r.papers
+    # 按年份排序，形成时间线式聚类
     years = sorted({(p.get("year") or 0) for p in papers})
     r.clusters = [f"近年在「{r.topic}」的代表进展（时间线 {y} 前后）" for y in years[-3:]] or [
         "尚无强相关文献，属早期阶段"]
