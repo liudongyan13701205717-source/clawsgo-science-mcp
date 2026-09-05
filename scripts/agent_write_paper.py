@@ -75,6 +75,7 @@ def main() -> int:
     doc = DocStore(layout, args.paper_id)
     root = layout.project_dir(args.paper_id)
 
+    # 1) 创建空章节占位，保证 export 可识别结构
     created = []
     for sec in _SECTION_ORDER:
         p = doc.section_path(sec)
@@ -82,13 +83,16 @@ def main() -> int:
             p.write_text(f"（{_HEADINGS[sec]}）\n", encoding="utf-8")
             created.append(sec)
 
+    # 重建 doc.md（含空章节）
     doc.rebuild_doc()
 
+    # 2) 成文清单（供 agent 依序填充）
     checklist = []
     for i, sec in enumerate(_SECTION_ORDER, 1):
         checklist.append(f"{i}. {_HEADINGS[sec]}  →  write_section(paper_id='{args.paper_id}', section='{sec}', ...)")
     checklist_txt = "\n".join(checklist)
 
+    # 3) 写协议
     (root / "WRITING_PROTOCOL.md").write_text(_PROTOCOL, encoding="utf-8")
 
     print("=" * 60)
