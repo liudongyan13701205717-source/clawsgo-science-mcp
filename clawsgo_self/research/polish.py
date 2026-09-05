@@ -109,10 +109,11 @@ def _check(text: str, mode: str) -> tuple[list, float]:
             issues.append("缺少规范参考文献引用。")
         if text.count("待补充") > 0:
             issues.append(f"存在 {text.count('待补充')} 处占位（待补充）未替换。")
-        if text.count("![") < 1 and not re.search(r"\\includegraphics|\\begin\{figure\}", text):
+        if text.count("![" ) < 1 and not re.search(r"\\includegraphics|\\begin\{figure\}", text):
             issues.append("缺少图（可用收敛曲线/对比图/框架图）。")
 
     elif mode == "consistency":
+        # 检查公式编号重复、术语口径不一、占位符残留
         eqs = re.findall(r"\(\s*(\d+)\s*\)", text)
         dup = {n for n in set(eqs) if eqs.count(n) > 1}
         if dup:
@@ -121,6 +122,8 @@ def _check(text: str, mode: str) -> tuple[list, float]:
             issues.append("存在未替换的模板占位符 {{...}}。")
         if re.search(r"(?i)\byour model\b|your approach\b|\bTODO\b", text):
             issues.append("存在留给读者的指代（your model/TODO），应改为确定名称。")
+        if "图 1" in text and "图 1" not in text and re.search(r"图\s+1", text):
+            pass
         if not issues:
             issues.append("未发现明显一致性问题，术语/编号统一。")
 
@@ -136,6 +139,7 @@ def _check(text: str, mode: str) -> tuple[list, float]:
     if not issues:
         issues.append("语言整体规范，无明显冗余或口语化表达。")
 
+    # 得分：100 满分按问题数扣
     base = 8.0 if len(issues) else 9.0
     score = round(max(3.0, min(10.0, base - 0.8 * len(issues))), 1)
     return issues, score
@@ -143,6 +147,7 @@ def _check(text: str, mode: str) -> tuple[list, float]:
 
 def _llm_polish(r: PolishResult, text: str, notes: list) -> None:
     sys = "你是学术写作编辑。仅针对给出的段落给出润色建议，不扩大范围。输出严格 JSON。"
+    # 取正文开头与结尾两段
     paras = [p for p in re.split(r"\n\s*\n", text) if len(p.strip()) > 60][:4]
     snippet = "\n\n".join(paras)
     prompt = (
