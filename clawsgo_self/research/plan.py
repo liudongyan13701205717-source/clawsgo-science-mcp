@@ -1,143 +1,197 @@
-"""研究计划书（research_plan）：由选题展开成完整研究计划。
+"""研究计划书：把选题扩展成一份可执行的完整研究计划（研究计划书）。
 
-产出：RQ/假设/目标/贡献/方法/数据/基线/指标/消融/里程碑/风险/计算资源。
-落盘 projects/{paper_id}/research/research_plan.{json,md}。
-无 LLM 时基于关键词 + 预设模板做确定性展开；可 LLM 增强细化。
+对齐 RESEARCH_PLANNING：产出
+  - 选题与标题
+  - 研究问题（RQ）与假设
+  - 目标与贡献
+  - 方法路线
+  - 数据集与基线
+  - 评估指标
+  - 消融
+  - 里程碑与进度表
+  - 风险与预期结果
+统一落盘 projects/{paper_id}/research/research_plan.json + markdown 片段。
+无 LLM 时确定性回退（可复用 ideate/experiment plan 的产物）。
 """
 
 from __future__ import annotations
 
 import json
-import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from clawsgo_self.core import Layout
 from clawsgo_self.core import model as llm
 
-_FIELDS = ["rq", "hypotheses", "objectives", "contributions", "methods",
-           "datasets", "baselines", "metrics", "ablation", "milestones",
-           "risks", "compute"]
-
-_LABELS = {
-    "rq": "研究问题", "hypotheses": "核心假设", "objectives": "研究目标",
-    "contributions": "主要贡献", "methods": "方法/模型", "datasets": "数据与基准",
-    "baselines": "基线方法", "metrics": "评估指标", "ablation": "消融设计",
-    "milestones": "里程碑", "risks": "风险与规避", "compute": "计算与资源",
-}
-
 
 @dataclass
 class ResearchPlan:
     ok: bool
-    paper_id: str = ""
+    title: str = ""
     topic: str = ""
-    rq: str = ""
+    question: str = ""
     hypotheses: list = field(default_factory=list)
     objectives: list = field(default_factory=list)
     contributions: list = field(default_factory=list)
-    methods: list = field(default_factory=list)
+    methodology: list = field(default_factory=list)
     datasets: list = field(default_factory=list)
     baselines: list = field(default_factory=list)
     metrics: list = field(default_factory=list)
     ablation: list = field(default_factory=list)
     milestones: list = field(default_factory=list)
     risks: list = field(default_factory=list)
+    expected: list = field(default_factory=list)
     compute: str = ""
     notes: list = field(default_factory=list)
     error: str = ""
     llm_used: bool = False
 
     def to_dict(self) -> dict:
-        return {k: getattr(self, k) for k in ("ok", "paper_id", "topic") + tuple(_FIELDS) + ("notes", "error", "llm_used")}
+        return {k: getattr(self, k) for k in (
+            "ok", "title", "topic", "question", "hypotheses", "objectives",
+            "contributions", "methodology", "datasets", "baselines", "metrics",
+            "ablation", "milestones", "risks", "expected", "compute",
+            "notes", "error", "llm_used",
+        )}
 
     def to_markdown(self) -> str:
         def bullet(xs):
-            return "\n".join(f"- {x}" for x in xs) if xs else "- （待细化）"
+            return "\n".join(f"- {x}" for x in xs) if xs else "- （待补充）"
 
-        lines = [f"# 研究计划书（{self.paper_id}）", f"**主题：** {self.topic}", ""]
-        for k in _FIELDS:
-            v = getattr(self, k)
-            label = _LABELS.get(k, k)
-            if isinstance(v, list):
-                lines += [f"## {label}", bullet(v), ""]
-            else:
-                lines += [f"## {label}", v or "（待细化）", ""]
-        return "\n".join(lines)
+        mets = "\n".join(
+            f"- {m if isinstance(m, str) else m.get('name', '')}"
+            for m in self.metrics
+        ) or "- （待补充）"
+        return "\n\n".join([
+            f"# 研究计划书：{self.title or '未命名'}",
+            f"**研究方向：** {self.topic or '—'}\n**研究问题：** {self.question or '—'}",
+            f"## 假设\n{bullet(self.hypotheses)}",
+            f"## 目标\n{bullet(self.objectives)}",
+            f"## 贡献\n{bullet(self.contributions)}",
+            f"## 方法路线\n{bullet(self.methodology)}",
+            f"## 数据集\n{bullet(self.datasets)}",
+            f"## 基线\n{bullet(self.baselines)}",
+            f"## 评估指标\n{mets}",
+            f"## 消融\n{bullet(self.ablation)}",
+            f"## 里程碑与进度\n{bullet(self.milestones)}",
+            f"## 风险\n{bullet(self.risks)}",
+            f"## 预期结果\n{bullet(self.expected)}",
+            f"## 计算资源\n{self.compute or '待评估'}",
+        ])
 
 
-def _empty() -> ResearchPlan:
-    return ResearchPlan(ok=False)
+def _load_ideation(layout: Layout, paper_id: str) -> dict:
+    p = layout.project_dir(paper_id) / "research" / "ideation.json"
+    if p.exists():
+        try:
+            return json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+    return {}
 
 
-def research_plan(*, topic: str, paper_id: str, layout: Layout) -> ResearchPlan:
-    topic = (topic or "").strip()
-    if len(topic) < 4:
-        r = _empty()
-        r.paper_id, r.error = paper_id, "研究主题过短或不合法。"
-        return r
+def _load_plan(layout: Layout, paper_id: str) -> dict:
+    p = layout.project_dir(paper_id) / "research" / "experiment_plan.json"
+    if p.exists():
+        try:
+            return json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+    return {}
 
-    r = _template(topic, paper_id)
+
+def research_plan(
+    topic: str,
+    *,
+    paper_id: str,
+    layout: Layout,
+) -> ResearchPlan:
+    r = ResearchPlan(ok=False, topic=topic)
+    notes: list = []
+    ide = _load_ideation(layout, paper_id)
+    ex = _load_plan(layout, paper_id)
+
+    # 标题/问题来源：优先已存在的 ideation/experiment plan
+    cands = ide.get("candidates") or []
+    title = ""
+    if cands:
+        title = cands[0].get("title", "") if isinstance(cands[0], dict) else str(cands[0])
+    r.title = title or ex.get("title") or topic
+    r.question = (
+        (ide.get("questions") or [""])[0]
+        or ex.get("question")
+        or f"针对「{topic}」，当前方法的瓶颈与更优方案是什么？"
+    )
+
     if llm.configured():
         try:
-            _llm_enhance(r)
+            _llm_plan(r, topic, notes)
             r.llm_used = True
         except RuntimeError as e:
-            r.notes.append(f"LLM 增强不可用，保留模板计划：{e}")
+            notes.append(f"LLM 计划书不可用，回退模板：{e}")
 
+    if not r.hypotheses:
+        _template_plan(r, ide, ex, notes)
+
+    r.notes = notes
     r.ok = True
     _persist(layout, paper_id, r)
     return r
 
 
-def _template(topic: str, paper_id: str) -> ResearchPlan:
-    toks = [t for t in re.split(r"[\s，。、,;；：:/]+|和|与|的|基于|面向", topic) if t]
-    top = toks[:2] or [topic]
-    base = "、".join(top)
-    return ResearchPlan(
-        ok=False, paper_id=paper_id, topic=topic,
-        rq=f"我们如何针对「{base}」设计并验证一种有效方法，使其在指标上显著优于现有基线？",
-        hypotheses=[f"H1：面向 {base} 的定制化建模/约束能带来稳定的性能增益。",
-                     f"H2：{base} 的收益在不同规模/数据分布下可迁移（鲁棒性）。"],
-        objectives=[f"O1：形式化 {base} 的研究问题与评估协议。",
-                     f"O2：实现并验证针对 {base} 的 {len(top)} 个候选方法。",
-                     "O3：给出消融与可解释性分析，定位增益来源。"],
-        contributions=[f"C1：提出面向 {base} 的 新方法/框架。",
-                        "C2：构建公开基准与可复现实验管线。",
-                        "C3：输出经验结论与设计准则。"],
-        methods=[f"M1：{base} 的基线方案（最简实现）。",
-                 f"M2：基于 {base} 的增强方案（本文核心）。"],
-        datasets=["公开数据集/基准（待选定，至少 2 个）", "消融用自定义子集"],
-        baselines=["最先进基线（SOTA）", "经典方法", "消融变体"],
-        metrics=["主指标（accuracy / loss / 延迟等）", "次指标（鲁棒性、参数量、能耗）"],
-        ablation=["逐组件消融", "超参数敏感性", "规模/分布泛化测试"],
-        milestones=["W1：文献与数据集确定", "W2：基线实现与流水线", "W3：核心方法+消融", "W4：写作与复现验证"],
-        risks=["R1：数据/算力受限 → 缩减规模或选用小基准", "R2：增益不显著 → 加强针对性设计/换角度评估"],
-        compute="单机 GPU（建议 ≥8GB），预算有限时优先小模型与小基准",
+def _llm_plan(r: ResearchPlan, topic: str, notes: list) -> None:
+    sys = "你是资深科研项目规划者。基于主题输出一份完整研究计划书。输出严格 JSON，不编造数据。"
+    prompt = (
+        f"研究方向：{topic}\n拟用标题：{r.title}\n研究问题：{r.question}\n\n"
+        "输出 JSON（键必须包含）：\n"
+        "{\"hypotheses\":[\"...\"],\"objectives\":[\"...\"],\"contributions\":[\"...\"],"
+        "\"methodology\":[\"...\"],\"datasets\":[\"公开数据+来源\"],\"baselines\":[\"...\"],"
+        "\"metrics\":[\"...\"],\"ablation\":[\"...\"],\"milestones\":[\"M1..M4 各一句\"],"
+        "\"risks\":[\"...\"],\"expected\":[\"...\"],\"compute\":\"资源估计一句\"}"
     )
-
-
-def _llm_enhance(r: ResearchPlan) -> None:
-    sys = "你是科研项目规划助手。基于已有计划，用中文给出更具体、可执行的细化。输出严格 JSON。"
-    prompt = ("主题：" + r.topic +
-              "\n现计划：" + r.to_markdown() +
-              "\n输出 JSON：{\"rq\":\"\",\"hypotheses\":[\"\"],\"objectives\":[\"\"],"
-              "\"contributions\":[\"\"],\"methods\":[\"\"],\"datasets\":[\"\"],"
-              "\"baselines\":[\"\"],\"metrics\":[\"\"],\"ablation\":[\"\"],"
-              "\"milestones\":[\"\"],\"risks\":[\"\"],\"compute\":\"\"}")
-    raw = llm.chat(prompt, system=sys, temperature=0.5, max_tokens=1600)
-    d = _strip_json_obj(raw)
-    if not d:
+    raw = llm.chat(prompt, system=sys, temperature=0.6, max_tokens=2000)
+    data = _strip_json_obj(raw)
+    if not data:
+        notes.append("LLM 输出非合法 JSON，回退模板。")
         return
-    if isinstance(d.get("rq"), str) and d["rq"].strip():
-        r.rq = d["rq"].strip()
-    for k in ("hypotheses", "objectives", "contributions", "methods",
-              "datasets", "baselines", "metrics", "ablation", "milestones", "risks"):
-        v = d.get(k)
-        if isinstance(v, list) and v:
-            setattr(r, k, [str(x) for x in v][:8])
-    if isinstance(d.get("compute"), str) and d["compute"].strip():
-        r.compute = d["compute"].strip()
+    for k in ("hypotheses", "objectives", "contributions", "methodology",
+              "datasets", "baselines", "metrics", "ablation", "milestones",
+              "risks", "expected"):
+        setattr(r, k, [str(x) for x in data.get(k, []) if x])
+    r.compute = data.get("compute", "")
+
+
+def _template_plan(r: ResearchPlan, ide: dict, ex: dict, notes: list) -> None:
+    if not r.hypotheses:
+        cands = [(c.get("hypothesis") if isinstance(c, dict) else "") for c in (ide.get("candidates") or [])]
+        r.hypotheses = [c for c in cands if c] or [f"「{r.topic}」可被轻量/更优方法在有限开销内解决"]
+    if not r.objectives:
+        r.objectives = [
+            "明确 {topic} 的核心瓶颈与机会点".format(topic=r.topic),
+            "设计并验证一种资源友好、可复现的方法",
+            "与现有基线在公开基准上做公平对比",
+        ]
+    if not r.contributions:
+        r.contributions = [f"提出面向「{r.topic}」的新方法/框架", "开源可复现实验与指标"]
+    if not r.methodology:
+        r.methodology = ["文献与基线梳理", "构建方案与实现", "消融与敏感性分析", "结果整理与撰写"]
+    if not r.datasets:
+        r.datasets = ex.get("datasets") or ["公开基准数据集（视领域而定）"]
+    if not r.baselines:
+        r.baselines = ex.get("baselines") or ["最简基线", "当前 SOTA"]
+    if not r.metrics:
+        r.metrics = ex.get("metrics") or [{"name": "准确率/损失", "direction": "minimize"}]
+    if not r.ablation:
+        r.ablation = ex.get("ablation") or ["去除核心组件", "关键超参敏感性"]
+    if not r.milestones:
+        r.milestones = ["M1 文献与选题收敛", "M2 原型与基线复现", "M3 实验与消融", "M4 撰写与交付"]
+    if not r.risks:
+        r.risks = ["数据/标签稀缺", "基线复现难度高于预期", "指标提升不显著（时间窗内）"]
+    if not r.expected:
+        r.expected = ex.get("expected") or ["相对基线有可量化提升，且开销可控"]
+    if not r.compute:
+        r.compute = ex.get("compute") or "单卡 CPU/GPU 即可完成小规模验证。"
+    notes.append("无 LLM，使用确定性模板生成研究计划书（回填 ideation/experiment_plan）。")
 
 
 def _strip_json_obj(raw: str) -> dict:
