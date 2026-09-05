@@ -131,6 +131,7 @@ def _template_scoring(text: str, stats: dict, found: list) -> dict:
     tables = stats.get("tables", 0)
     figures = stats.get("figures", 0)
 
+    # novelty: 有方法推导/公式给基础分，缺背景再扣
     novelty = 6.0
     if has_formula:
         novelty += 0.5
